@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Chess</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/app.js" defer></script>
+</head>
+<body>
+    <div class="navbar">
+        <div class="nav-brand">♟ Multiplayer Chess</div>
+        <div class="nav-links">
+            <button id="btn-nav-home" onclick="location.reload()">首页</button>
+            <button id="btn-nav-live" onclick="showView('live')">正在对局</button>
+            <button id="btn-nav-archive" onclick="showView('archive')">棋谱存档</button>
+        </div>
+    </div>
+
+    <!-- Home View -->
+    <div id="view-home" class="view-section active">
+        <div class="menu-card">
+            <h1 style="color: #2ecc71; margin-bottom: 10px;">国际象棋</h1>
+            <p style="color:#bdc3c7; margin-bottom: 40px; font-size: 16px;">联机对战 · 棋谱分析 · 云端存储</p>
+            <button class="btn-live menu-btn" onclick="showView('live')">开始联机对战</button>
+            <button class="btn-archive menu-btn" onclick="showView('archive')">研究历史记录</button>
+        </div>
+    </div>
+
+    <!-- Live Game View -->
+    <div id="view-live" class="view-section">
+        <div id="live-board" class="board-grid"></div>
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:bold; font-size: 18px;">🔴 房间: <span id="room-id-label">-</span></span>
+                    <span id="live-status-label" style="font-size:11px; padding: 2px 8px; border-radius:10px; background:#1a252f; color:#2ecc71;">在线</span>
+                </div>
+                <div style="margin-top: 8px; color:#bdc3c7; font-size:13px;">轮到: <span id="live-turn-label" style="color:white; font-weight:bold;">白方</span></div>
+                <div id="live-msg" style="margin-top:5px; font-size:12px; height:1.2em;"></div>
+            </div>
+            <div class="history-box" id="live-history"></div>
+            <div class="footer-tools">
+                <div class="btn-group">
+                    <button class="btn-sm btn-nav" onclick="navLiveStep(-100)">|&lt;</button>
+                    <button class="btn-sm btn-nav" onclick="navLiveStep(-1)">&lt;</button>
+                    <button class="btn-sm btn-nav" onclick="navLiveStep(1)">&gt;</button>
+                    <button class="btn-sm btn-nav" onclick="navLiveStep(100)">&gt;|</button>
+                    <button class="btn-sm btn-action" style="background: #27ae60;" onclick="saveCurrentGame()">💾 保存</button>
+                </div>
+                <button class="btn-sm" id="btn-reset" style="width:100%; background:#e74c3c; margin-top:10px; display:none;" onclick="resetGame()">🔄 重新开始新对局</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Archive Study View -->
+    <div id="view-archive" class="view-section">
+        <div id="archive-board" class="board-grid"></div>
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div style="display: flex; gap:8px; margin-bottom: 8px;">
+                    <select id="archive-select" style="flex:2; padding:6px; border-radius:6px; background:#1a252f; color:white; border:1px solid #455a64; outline:none; font-size:12px;"></select>
+                    <button class="btn-sm" style="background:#3498db; padding: 0 10px; font-size:12px;" onclick="loadSavedArchive()">加载</button>
+                </div>
+                <div id="archive-step-info" style="color:#bdc3c7; font-size: 13px;">请选择棋谱加载</div>
+            </div>
+            <div class="history-box" id="archive-history"></div>
+            <div class="footer-tools">
+                <div class="btn-group">
+                    <button class="btn-sm btn-nav" onclick="navArchiveStep(-100)">|&lt;</button>
+                    <button class="btn-sm btn-nav" onclick="navArchiveStep(-1)">&lt;</button>
+                    <button class="btn-sm btn-nav" onclick="navArchiveStep(1)">&gt;</button>
+                    <button class="btn-sm btn-nav" onclick="navArchiveStep(100)">&gt;|</button>
+                    <button class="btn-sm btn-action" style="background:#7f8c8d;" onclick="showView('live')">🔙 返回</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Game Modal -->
+    <div id="save-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h3 style="margin-top:0; color:#2ecc71;">💾 保存棋谱</h3>
+            <p style="color:#bdc3c7; font-size:14px;">请输入棋谱保存名称：</p>
+            <input type="text" id="save-filename-input" style="width:100%; padding:12px; border-radius:6px; background:#1a252f; color:white; border:1px solid #455a64; margin-bottom:20px; box-sizing:border-box;">
+            <div style="display:flex; gap:10px;">
+                <button class="btn-sm" style="flex:1; background:#7f8c8d;" onclick="closeSaveModal()">取消</button>
+                <button class="btn-sm" style="flex:1; background:#2ecc71;" onclick="confirmSaveGame()">确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Promotion Modal -->
+    <div id="promotion-modal" class="modal-overlay">
+        <div class="modal-box promo-box">
+            <div class="promo-item" onclick="confirmPromo('Q')">♕</div>
+            <div class="promo-item" onclick="confirmPromo('R')">♖</div>
+            <div class="promo-item" onclick="confirmPromo('B')">♗</div>
+            <div class="promo-item" onclick="confirmPromo('N')">♘</div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+</body>
+</html>
+
