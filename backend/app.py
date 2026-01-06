@@ -61,17 +61,14 @@ async def save_game(room_id: str, filename: str = None):
     # 确保保存目录存在
     os.makedirs("saved_games", exist_ok=True)
     
-    # 保存 PGN
-    pgn_content = game.get_pgn()
-    with open(f"saved_games/{save_name}.pgn", "w", encoding="utf-8") as f:
-        f.write(pgn_content)
+    # 获取完整状态进行保存
+    state_dict = game.get_state_dict()
     
-    # 保存完整状态快照
-    import json as py_json
+    # 统一保存为 JSON，作为持久化的唯一来源
     with open(f"saved_games/{save_name}.json", "w", encoding="utf-8") as f:
-        py_json.dump(game.get_state_dict(), f, indent=2, ensure_ascii=False)
+        json.dump(state_dict, f, indent=2, ensure_ascii=False)
     
-    return {"message": f"游戏已成功保存为 {save_name}", "pgn": pgn_content}
+    return {"message": f"游戏已成功保存为 {save_name}", "pgn": game.get_pgn()}
 
 @app.get("/list_saved")
 def list_saved():

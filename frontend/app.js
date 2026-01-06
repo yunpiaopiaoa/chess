@@ -59,8 +59,11 @@ function refreshUI() {
     // Live View
     if (liveData) {
         const lGrid = document.getElementById('live-board');
-        const isHistoryView = liveViewIdx !== null && liveViewIdx < liveData.history.length;
-        const b = isHistoryView ? liveData.snapshots[liveViewIdx] : liveData.board;
+        const isHistoryView = liveViewIdx !== null && liveViewIdx < liveData.fen_history.length;
+        
+        // 核心彻底重构：完全通过 FEN 解析出当前棋盘
+        const targetFEN = isHistoryView ? liveData.fen_history[liveViewIdx] : liveData.fen_history[liveData.fen_history.length - 1];
+        const b = parseFENToGrid(targetFEN);
         
         renderBoard(lGrid, b, liveData.legal_moves, isHistoryView || liveData.game_over);
         renderHistory(document.getElementById('live-history'), liveData, liveViewIdx, true);
@@ -86,7 +89,10 @@ function refreshUI() {
     // Archive View
     const aGrid = document.getElementById('archive-board');
     if (archiveData) {
-        const b = (archiveIdx !== null && archiveData.snapshots[archiveIdx]) ? archiveData.snapshots[archiveIdx] : archiveData.board;
+        const targetFEN = (archiveIdx !== null && archiveIdx < archiveData.fen_history.length) 
+                        ? archiveData.fen_history[archiveIdx] 
+                        : archiveData.fen_history[archiveData.fen_history.length - 1];
+        const b = parseFENToGrid(targetFEN);
         renderBoard(aGrid, b, {}, true);
         renderHistory(document.getElementById('archive-history'), archiveData, archiveIdx, false);
         document.getElementById('archive-step-info').innerText = `步数: ${archiveIdx || 0} / ${archiveData.history.length}`;
@@ -95,11 +101,51 @@ function refreshUI() {
     }
 }
 
+/**
+ * 动态 FEN 解析器：自动适配棋盘维度
+ */
+function parseFENToGrid(fen) {
+    const placement = fen.split(' ')[0];
+    const rowsArr = placement.split('/');
+    const rowCount = rowsArr.length;
+    
+    // 计算列数 (从第一行推导)
+    let colCount = 0;
+    for (const char of rowsArr[0]) {
+        if (/\d/.test(char)) colCount += parseInt(char);
+        else colCount++;
+    }
+
+    const grid = Array(rowCount).fill(null).map(() => Array(colCount).fill(null));
+    
+    rowsArr.forEach((rowStr, r) => {
+        let c = 0;
+        for (const char of rowStr) {
+            if (/\d/.test(char)) {
+                c += parseInt(char);
+            } else {
+                const color = char === char.toUpperCase() ? 'white' : 'black';
+                const type = char.toUpperCase();
+                grid[r][c] = { type, color };
+                c++;
+            }
+        }
+    });
+    return grid;
+}
+
 function renderBoard(container, grid, legals, readOnly) {
-    if (!container) return;
+    if (!container || !grid.length) return;
     container.innerHTML = '';
-    for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
+    const rows = grid.length;
+    const cols = grid[0].length;
+
+    // 动态调整 CSS Grid 布局以适配不同维度的棋盘
+    container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
             const sq = document.createElement('div');
             sq.className = `square ${(r + c) % 2 === 0 ? 'white' : 'black'}`;
             
@@ -133,10 +179,16 @@ function onSqClick(r, c) {
         }
         return;
     }
+
+    // 从最新的 FEN 解析出当前棋盘状态
+    const b = parseFENToGrid(liveData.fen_history[liveData.fen_history.length - 1]);
+
     if (selected) {
         const ms = liveData.legal_moves[`${selected.r},${selected.c}`] || [];
         if (ms.some(m => m[0] === r && m[1] === c)) {
-            if (liveData.board[selected.r][selected.c].type === 'P' && (r === 0 || r === 7)) {
+            // 升变判断：如果是兵到达底线
+            const p = b[selected.r][selected.c];
+            if (p && p.type === 'P' && (r === 0 || r === b.length - 1)) {
                 pMove = { start: [selected.r, selected.c], end: [r, c] };
                 document.getElementById('promotion-modal').style.display = 'flex';
             } else {
@@ -144,11 +196,11 @@ function onSqClick(r, c) {
             }
             selected = null;
         } else {
-            const p = liveData.board[r][c];
+            const p = b[r][c];
             selected = (p && p.color === liveData.turn) ? {r, c} : null;
         }
     } else {
-        const p = liveData.board[r][c];
+        const p = b[r][c];
         if (p && p.color === liveData.turn) selected = {r, c};
     }
     refreshUI();
