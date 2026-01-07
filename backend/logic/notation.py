@@ -7,9 +7,56 @@ if TYPE_CHECKING:
     from .board import Board
 
 from .constants import Color, PieceType
-from .piece import Pawn, Rook, Knight, Bishop, Queen, King
+from .piece import Piece
+
+if TYPE_CHECKING:
+    from .board import Board
+    from .move import Move
 
 class NotationHandler:
+    @staticmethod
+    def generate_san(board: 'Board', move: 'Move'):
+        """生成标准代数记谱法 (SAN)"""
+        if move.piece.type == PieceType.KING and abs(move.start[1] - move.end[1]) == 2:
+            base = "O-O" if move.end[1] > move.start[1] else "O-O-O"
+        else:
+            res = ""
+            is_capture = move.captured_piece is not None or \
+                         (move.piece.type == PieceType.PAWN and move.start[1] != move.end[1])
+
+            if move.piece.type != PieceType.PAWN:
+                res += move.piece.type.value
+                # 消歧逻辑
+                others = []
+                for p in board.pieces[move.piece.color]:
+                    if p != move.piece and p.type == move.piece.type:
+                        legal_moves = board.get_piece_legal_moves(p.position, move.piece.color)
+                        if any(m.end == move.end for m in legal_moves):
+                            others.append(p.position)
+                
+                if others:
+                    if all(pos[1] != move.start[1] for pos in others):
+                        res += chr(ord('a') + move.start[1])
+                    elif all(pos[0] != move.start[0] for pos in others):
+                        res += str(board.rows - move.start[0])
+                    else:
+                        res += NotationHandler.coord_to_algebraic(move.start, board.rows)
+            elif is_capture:
+                res += chr(ord('a') + move.start[1])
+
+            if is_capture: res += "x"
+            res += NotationHandler.coord_to_algebraic(move.end, board.rows)
+            
+            if move.promotion_choice:
+                res += f"={move.promotion_choice}"
+            base = res
+
+        if move.is_checkmate:
+            return base + "#"
+        if move.is_check:
+            return base + "+"
+        return base
+
     @staticmethod
     def coord_to_algebraic(pos, rows):
         """(r, c) -> 'e4'"""
@@ -33,9 +80,6 @@ class NotationHandler:
         board.king_pos = {Color.WHITE: None, Color.BLACK: None}
         
         rows_str = placement.split('/')
-        char_to_class = {
-            'p': Pawn, 'r': Rook, 'n': Knight, 'b': Bishop, 'q': Queen, 'k': King
-        }
         
         for r, row_str in enumerate(rows_str):
             if r >= board.rows: break
@@ -45,9 +89,8 @@ class NotationHandler:
                 if char.isdigit():
                     c += int(char)
                 else:
-                    color = Color.WHITE if char.isupper() else Color.BLACK
-                    piece_class = char_to_class[char.lower()]
-                    board._add_piece(piece_class, color, (r, c))
+                    piece = Piece.from_char(char, (r, c))
+                    board._add_piece(piece)
                     c += 1
 
     @staticmethod
@@ -91,10 +134,10 @@ class NotationHandler:
         # 过路兵目标格
         ep_sq = "-"
         if board.last_move:
-            start, end, piece = board.last_move
-            if piece and piece.type == PieceType.PAWN and abs(start[0] - end[0]) == 2:
-                row = (start[0] + end[0]) // 2
-                ep_sq = f"{chr(ord('a') + start[1])}{board.rows - row}"
+            prev_move = board.last_move
+            if prev_move.piece.type == PieceType.PAWN and abs(prev_move.start[0] - prev_move.end[0]) == 2:
+                row = (prev_move.start[0] + prev_move.end[0]) // 2
+                ep_sq = f"{chr(ord('a') + prev_move.start[1])}{board.rows - row}"
         
         return f"{placement} {turn_str} {castling} {ep_sq} 0 1"
 
@@ -128,7 +171,7 @@ class NotationHandler:
         return pgn + result
 
     @staticmethod
-    def parse_san_to_move(san, turn, board):
+    def parse_san_to_move(san, turn, board: 'Board'):
         """将 SAN ('Nf3') 解析为 (start, target, promotion_choice)"""
         clean_san = san.rstrip('+#?! ')
         if clean_san == "O-O":
@@ -146,16 +189,21 @@ class NotationHandler:
         target = NotationHandler.algebraic_to_coord(target_str, board.rows)
         p_type = PieceType(p_char) if p_char else PieceType.PAWN
         
-        legal_moves = board.get_legal_moves(turn)
-        for start, ends in legal_moves.items():
-            if target not in ends: continue
-            piece = board.grid[start[0]][start[1]]
-            if not piece or piece.type != p_type: continue
+        possible_starts = []
+        for piece in board.pieces[turn]:
+            if piece.type != p_type: continue
             
-            # 消歧检查
-            if d_file and chr(ord('a') + start[1]) != d_file: continue
-            if d_rank and str(board.rows - start[0]) != d_rank: continue
-            
+            # 定向计算该棋子的合法移动
+            moves = board.get_piece_legal_moves(piece.position, turn)
+            if any(m.end == target for m in moves):
+                # 消歧检查
+                if d_file and chr(ord('a') + piece.position[1]) != d_file: continue
+                if d_rank and str(board.rows - piece.position[0]) != d_rank: continue
+                
+                possible_starts.append(piece.position)
+
+        if len(possible_starts) == 1:
             p_choice = promo[1] if promo else None
-            return start, target, p_choice
+            return possible_starts[0], target, p_choice
+            
         return None, None, None

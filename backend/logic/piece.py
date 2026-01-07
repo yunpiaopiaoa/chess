@@ -5,15 +5,21 @@ from .constants import Color, PieceType
 from .rules import MoveRules
 
 if TYPE_CHECKING:
-    # 这里如果以后需要引用 Board 可以加
-    pass
+    from .move import Move
 
 class Piece:
-    def __init__(self, color:Color, position:tuple[int,int]):
+    def __init__(self, color: Color, position: tuple[int, int], piece_type: PieceType):
         self.color = color
-        self.position = position # (row, col)
-        self.type:PieceType
+        self.position = position  # (row, col)
+        self.type = piece_type
         self.step = 0
+
+    @staticmethod
+    def from_char(char: str, position: tuple[int, int]) -> Piece:
+        """工厂方法：从字符（如 'P', 'n'）创建棋子对象"""
+        color = Color.WHITE if char.isupper() else Color.BLACK
+        # PieceType 的值本身就是大写字母 'P', 'R' 等
+        return Piece(color, position, PieceType(char.upper()))
 
     def __str__(self):
         symbol = self.type.value
@@ -27,56 +33,20 @@ class Piece:
             "step": self.step
         }
 
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
+    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[Move, None, None]:
         """
-        不再依赖 Board 对象，直接接收核心数据。
+        动态派发策略：根据当前的 type 调用对应的 MoveRules
         """
-        raise NotImplementedError
-
-class Pawn(Piece):
-    def __init__(self, color, position):
-        super().__init__(color, position)
-        self.type = PieceType.PAWN
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_pawn_moves(grid, rows, cols, last_move, self.position, self.color)
-
-class Rook(Piece):
-    def __init__(self, color: Color, position: tuple[int, int]):
-        super().__init__(color, position)
-        self.type = PieceType.ROOK
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_rook_moves(grid, rows, cols, self.position, self.color)
-
-class Knight(Piece):
-    def __init__(self, color: Color, position: tuple[int, int]):
-        super().__init__(color, position)
-        self.type = PieceType.KNIGHT
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_knight_moves(grid, rows, cols, self.position, self.color)
-
-class Bishop(Piece):
-    def __init__(self, color: Color, position: tuple[int, int]):
-        super().__init__(color, position)
-        self.type = PieceType.BISHOP
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_bishop_moves(grid, rows, cols, self.position, self.color)
-
-class Queen(Piece):
-    def __init__(self, color: Color, position: tuple[int, int]):
-        super().__init__(color, position)
-        self.type = PieceType.QUEEN
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_queen_moves(grid, rows, cols, self.position, self.color)
-
-class King(Piece):
-    def __init__(self, color: Color, position: tuple[int, int]):
-        super().__init__(color, position)
-        self.type = PieceType.KING
-
-    def get_valid_moves(self, grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any) -> Generator[tuple[int, int], None, None]:
-        yield from MoveRules.get_king_moves(grid, rows, cols, self.position, self.color)
+        rule_map = {
+            PieceType.PAWN: lambda: MoveRules.get_pawn_moves(grid, rows, cols, last_move, self.position, self.color),
+            PieceType.ROOK: lambda: MoveRules.get_rook_moves(grid, rows, cols, self.position, self.color),
+            PieceType.KNIGHT: lambda: MoveRules.get_knight_moves(grid, rows, cols, self.position, self.color),
+            PieceType.BISHOP: lambda: MoveRules.get_bishop_moves(grid, rows, cols, self.position, self.color),
+            PieceType.QUEEN: lambda: MoveRules.get_queen_moves(grid, rows, cols, self.position, self.color),
+            PieceType.KING: lambda: MoveRules.get_king_moves(grid, rows, cols, self.position, self.color),
+        }
+        method = rule_map.get(self.type)
+        if not method:
+            raise NotImplementedError
+        
+        yield from method()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Generator, Any
-from .constants import Color, PieceType
+from .constants import Color, PieceType, MoveType
+from .move import Move, CastlingMove, EnPassantMove, PromotionMove
 
 if TYPE_CHECKING:
     from .piece import Piece
@@ -42,54 +43,64 @@ class MoveRules:
         return False
 
     @staticmethod
-    def _get_moves_in_directions(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color, directions: list[tuple[int, int]], limit: int | None = None) -> Generator[tuple[int, int], None, None]:
+    def _get_moves_in_directions(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color, directions: list[tuple[int, int]], limit: int | None = None) -> Generator[Move, None, None]:
         if limit is None:
             limit = max(rows, cols)
             
         r, c = pos
+        piece = grid[r][c]
+        if not piece: return
+
         for dr, dc in directions:
             for i in range(1, limit + 1):
                 nr, nc = r + dr * i, c + dc * i
                 if not (0 <= nr < rows and 0 <= nc < cols): break
                 target = grid[nr][nc]
                 if target is None:
-                    yield (nr, nc)
+                    yield Move(pos, (nr, nc), piece)
                 elif target.color != color:
-                    yield (nr, nc)
+                    yield Move(pos, (nr, nc), piece, captured_piece=target)
                     break
                 else: break
 
     @staticmethod
-    def get_rook_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_rook_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         return MoveRules._get_moves_in_directions(grid, rows, cols, pos, color, MoveRules.STRAIGHT_DIRS)
 
     @staticmethod
-    def get_bishop_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_bishop_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         return MoveRules._get_moves_in_directions(grid, rows, cols, pos, color, MoveRules.DIAGONAL_DIRS)
 
     @staticmethod
-    def get_queen_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_queen_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         yield from MoveRules.get_rook_moves(grid, rows, cols, pos, color)
         yield from MoveRules.get_bishop_moves(grid, rows, cols, pos, color)
 
     @staticmethod
-    def get_knight_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_knight_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         return MoveRules._get_moves_in_directions(grid, rows, cols, pos, color, MoveRules.KNIGHT_OFFSETS, limit=1)
 
     @staticmethod
-    def get_pawn_moves(grid: list[list[Piece | None]], rows: int, cols: int, last_move: Any, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_pawn_moves(grid: list[list[Piece | None]], rows: int, cols: int, last_move: Move | Any, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         r, c = pos
         piece = grid[r][c]
+        if not piece: return
         direction = -1 if color == Color.WHITE else 1
+        promotion_row = 0 if color == Color.WHITE else rows - 1
         
         # 1. 前进
         tr, tc = r + direction, c
         if 0 <= tr < rows and 0 <= tc < cols and grid[tr][tc] is None:
-            yield (tr, tc)
-            if piece and piece.step == 0:
-                tr2, tc2 = tr + direction, tc
-                if 0 <= tr2 < rows and 0 <= tc2 < cols and grid[tr2][tc2] is None:
-                    yield (tr2, tc2)
+            if tr == promotion_row:
+                #WARNING:注意这里并没有考虑升变棋子，但不影响对局
+                #如果后续考虑ai搜索，需要改成多产出几种升变选择
+                yield PromotionMove(pos, (tr, tc), piece)
+            else:
+                yield Move(pos, (tr, tc), piece)
+                if piece.step == 0:
+                    tr2, tc2 = tr + direction, tc
+                    if 0 <= tr2 < rows and 0 <= tc2 < cols and grid[tr2][tc2] is None:
+                        yield Move(pos, (tr2, tc2), piece)
         
         # 2. 吃子与过路兵
         for dc in [-1, 1]:
@@ -98,15 +109,24 @@ class MoveRules:
             
             target = grid[tr][tc]
             if target and target.color != color:
-                yield (tr, tc)
+                if tr == promotion_row:
+                    yield PromotionMove(pos, (tr, tc), piece, captured_piece=target)
+                else:
+                    yield Move(pos, (tr, tc), piece, captured_piece=target)
             elif target is None and last_move:
-                l_start, l_end, l_piece = last_move
+                # 适配新的 Move 对象或旧的元组
+                if isinstance(last_move, Move):
+                    l_start, l_end, l_piece = last_move.start, last_move.end, last_move.piece
+                else:
+                    l_start, l_end, l_piece = last_move
+                
                 if l_piece and l_piece.type == PieceType.PAWN and l_piece.color != color:
                     if l_end == (r, c + dc) and abs(l_start[0] - l_end[0]) == 2:
-                        yield (tr, tc)
+                        # 过路兵被吃的是 l_piece，位于 (r, c + dc)
+                        yield EnPassantMove(pos, (tr, tc), piece, captured_piece=l_piece)
 
     @staticmethod
-    def get_king_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[tuple[int, int], None, None]:
+    def get_king_moves(grid: list[list[Piece | None]], rows: int, cols: int, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         # 1. 基础移动
         yield from MoveRules._get_moves_in_directions(
             grid, rows, cols, pos, color, 
@@ -132,4 +152,4 @@ class MoveRules:
                     # 检查路径格子是否受攻击（不包括王起始位置，因为已经检查过了）
                     check_path = range(c + step, target_col + step, step)
                     if all(not MoveRules.is_square_attacked(grid, rows, cols, (r, col), color.opposite()) for col in check_path):
-                        yield (r, target_col)
+                        yield CastlingMove(pos, (r, target_col), king, is_kingside=(rook_col > c))

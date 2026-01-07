@@ -166,7 +166,8 @@ function renderBoard(container, grid, readOnly) {
             if (!readOnly && selected && selected.r === r && selected.c === c) sq.classList.add('selected');
             if (!readOnly && selected) {
                 const moves = pieceMovesCache[`${selected.r},${selected.c}`] || [];
-                if (moves.some(m => m[0] === r && m[1] === c)) sq.classList.add('highlight');
+                // 现在 moves 是对象列表 [{end: [r,c], type: '...'}]
+                if (moves.some(m => m.end[0] === r && m.end[1] === c)) sq.classList.add('highlight');
             }
 
             sq.onclick = () => { if (!readOnly) onSqClick(r, c); };
@@ -192,9 +193,12 @@ function onSqClick(r, c) {
     if (selected) {
         // 检查是否点击了已经缓存的合法移动
         const ms = pieceMovesCache[`${selected.r},${selected.c}`] || [];
-        if (ms.some(m => m[0] === r && m[1] === c)) {
-            // 执行移动逻辑...
-            if (p && p.type === 'P' && (r === 0 || r === b.length - 1)) {
+        const moveObj = ms.find(m => m.end[0] === r && m.end[1] === c);
+        
+        if (moveObj) {
+            // 执行移动逻辑... 
+            // 利用后端返回的 type 直接判断，不再手动检查坐标和棋子类型
+            if (moveObj.type === 'promotion') {
                 pMove = { start: [selected.r, selected.c], end: [r, c] };
                 document.getElementById('promotion-modal').style.display = 'flex';
             } else {

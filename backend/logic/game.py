@@ -1,8 +1,7 @@
 import os
 import json
 from .board import Board
-from .constants import Color, PieceType
-from .piece import Piece, Queen, Rook, Bishop, Knight
+from .constants import Color, MoveType
 from .notation import NotationHandler
 
 class Game:
@@ -64,64 +63,44 @@ class Game:
         if self.game_over:
             return False, "游戏已结束"
 
-        # 获取该位置棋子的合法移动（仅针对当前点击或尝试拖拽的棋子计算）
+        # 1. 验证合法性并获取完整的 Move 对象
         legal_moves = self.get_piece_legal_moves(start)
-        if not legal_moves or end not in legal_moves:
+        move = next((m for m in legal_moves if m.end == end), None)
+        
+        if not move:
             return False, "非法移动"
 
-        piece: Piece = self.board.grid[start[0]][start[1]] # 既然通过了合法校验，piece 肯定存在
-        
-        # 移动前的变量准备
-        is_capture = self.board.grid[end[0]][end[1]] is not None or \
-                     (piece.type == PieceType.PAWN and start[1] != end[1])
-        
-        # 记录移动信息
-        move_notation = ""
-        if piece.type == PieceType.KING and abs(start[1] - end[1]) == 2:
-            move_notation = "O-O" if end[1] == 6 else "O-O-O"
-        else:
-            if piece.type != PieceType.PAWN:
-                move_notation += piece.type.value
-            elif is_capture:
-                move_notation += chr(ord('a') + start[1])
-            
-            if is_capture: move_notation += "x"
-            move_notation += NotationHandler.coord_to_algebraic(end, self.board.rows)
+        # 2. 如果是升变，记录选择
+        if move.move_type == MoveType.PROMOTION:
+            move.promotion_choice = (promotion_choice or "Q").upper()
 
-        # 执行移动
-        self.board.move_piece(start, end)
-        
-        # 处理升变
-        if piece.type == PieceType.PAWN:
-            last_row = 0 if piece.color == Color.WHITE else self.board.rows - 1
-            if end[0] == last_row:
-                choices = {"Q": Queen, "R": Rook, "B": Bishop, "N": Knight}
-                target_class = choices.get(promotion_choice, Queen)
-                p_char = promotion_choice if promotion_choice in choices else "Q"
-                self.board.promote_pawn(end, target_class)
-                move_notation += f"={p_char}"
+        # 3. 执行单次物理移动
+        move.execute(self.board)
 
-        if self.board.is_in_check(self.turn.opposite()):
-            move_notation += "+"
-
-        self.move_history.append(move_notation)
-        self.turn = self.turn.opposite()
-        
-        # 三次重复检测
-        current_fen = NotationHandler.generate_board_fen(self.board, self.turn)
-        self.fen_history.append(current_fen)
-
-        if self.board.is_checkmate(self.turn):
-            self.game_over = True
-            self.winner = self.turn.opposite()
-            if self.move_history:
-                self.move_history[-1] = self.move_history[-1].replace("+", "#")
-        elif self.board.is_stalemate(self.turn):
+        # 4. 更新对局状态（将军、将死、平局）
+        opponent_color = self.turn.opposite()
+        if self.board.is_in_check(opponent_color):
+            move.is_check = True
+            if self.board.is_checkmate(opponent_color):
+                move.is_checkmate = True
+                self.game_over = True
+                self.winner = self.turn
+        elif self.board.is_stalemate(opponent_color):
             self.game_over = True
             self.winner = None
-        elif self.fen_history.count(current_fen) >= 3:
+
+        # 5. 生成记谱并记录历史
+        move.san = NotationHandler.generate_san(self.board, move)
+        self.move_history.append(move.san)
+
+        # 6. 切换回合与历史记录
+        self.turn = opponent_color
+        current_fen = NotationHandler.generate_board_fen(self.board, self.turn)
+        self.fen_history.append(current_fen)
+        
+        if not self.game_over and self.fen_history.count(current_fen) >= 3:
             self.game_over = True
-            self.winner = None # 平局
+            self.winner = None
             
         return True, "成功"
 

@@ -115,11 +115,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             
             if message["type"] == "get_moves":
                 pos = tuple(message["pos"])
-                moves = game.get_piece_legal_moves(pos)
+                # 返回包含移动类型的信息，方便前端判断是否为升变控制弹窗
+                legal_moves = game.get_piece_legal_moves(pos)
+                moves_data = [
+                    {
+                        "end": m.end, 
+                        "type": m.move_type.value
+                    } for m in legal_moves
+                ]
                 await websocket.send_text(json.dumps({
                     "type": "piece_moves",
                     "pos": pos,
-                    "moves": moves
+                    "moves": moves_data
                 }))
             
             elif message["type"] == "move":
