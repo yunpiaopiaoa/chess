@@ -38,7 +38,6 @@ def create_scholar_mate():
         json.dump(game.get_state_dict(), f, indent=2, ensure_ascii=False)
         
     print(f"测试棋谱已创建: {filename}")
-    print(f"PGN: {game.get_pgn()}")
 
 if __name__ == "__main__":
     create_scholar_mate()

@@ -1,6 +1,11 @@
-from .constants import Color, PieceType
-from .piece import Pawn, Piece, Rook, Knight, Bishop, Queen, King
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any
+from .constants import Color, PieceType, MoveType
+from .piece import Piece
 from .rules import MoveRules
+
+if TYPE_CHECKING:
+    from .piece import Piece
 
 class Board:
     def __init__(self, rows=8, cols=8):
@@ -8,12 +13,12 @@ class Board:
         self.cols = cols
         self.grid: list[list[Piece|None]] = [[None for _ in range(cols)] for _ in range(rows)]
         # 优化追踪器：直接存储在场棋子对象
-        self.pieces = {Color.WHITE: set(), Color.BLACK: set()}
+        self.pieces:dict[Color,set[Piece]] = {Color.WHITE: set(), Color.BLACK: set()}
         # 缓存王的位置 (r, c)
-        self.king_pos = {Color.WHITE: None, Color.BLACK: None}
-        self.last_move = None # 记录 (start, end, piece)
+        self.king_pos: dict[Color, tuple[int, int]|None] = {Color.WHITE: None, Color.BLACK: None}
+        self.last_move:tuple[tuple[int,int],tuple[int,int],Piece]|None = None # 记录 (start, end, piece)
 
-    def _add_piece(self, piece_class, color, pos):
+    def _add_piece(self, piece_class:type[Piece], color, pos):
         r, c = pos
         piece = piece_class(color, pos)
         self.grid[r][c] = piece
@@ -39,7 +44,7 @@ class Board:
             res += f"|{self.rows-r}\n"
         return res
 
-    def move_piece(self, start, end):
+    def move_piece(self, start:tuple[int,int], end:tuple[int,int]):
         """
         执行移动（自动处理王车易位和吃过路兵）
         返回: (被捕获的棋子, 移动类型)
@@ -48,7 +53,7 @@ class Board:
         end_r, end_c = end
         piece = self.grid[start_r][start_c]
         captured_piece = self.grid[end_r][end_c]
-        move_type = "normal"
+        move_type = MoveType.NORMAL
 
         # 1. 检查吃过路兵 (En Passant)
         if piece and piece.type == PieceType.PAWN and start_c != end_c and captured_piece is None:
@@ -56,14 +61,14 @@ class Board:
             self.grid[start_r][end_c] = None
             if captured_piece:
                 self.pieces[captured_piece.color].remove(captured_piece)
-            move_type = "en_passant"
+            move_type = MoveType.EN_PASSANT
 
         # 2. 更新追踪器：王的位置
         if piece and piece.type == PieceType.KING:
             self.king_pos[piece.color] = (end_r, end_c)
 
         # 3. 更新追踪器：移除普通被捕获棋子
-        if captured_piece and move_type == "normal":
+        if captured_piece and move_type == MoveType.NORMAL:
             self.pieces[captured_piece.color].remove(captured_piece)
 
         # 4. 执行基础位置移动
@@ -76,7 +81,7 @@ class Board:
 
         # 5. 检查王车易位 (Castling)
         if piece and piece.type == PieceType.KING and abs(start_c - end_c) == 2:
-            move_type = "castling"
+            move_type = MoveType.CASTLING
             # 根据移动方向确定是长易位还是短易位
             is_kingside = (end_c > start_c)
             rook_start_c = self.cols - 1 if is_kingside else 0
@@ -92,7 +97,7 @@ class Board:
         self.last_move = (start, end, piece)
         return captured_piece, move_type
 
-    def undo_move(self, start, end, captured_piece, move_type="normal"):
+    def undo_move(self, start, end, captured_piece, move_type=MoveType.NORMAL):
         """
         撤销移动（精准回滚所有特殊状态）
         """
@@ -115,9 +120,9 @@ class Board:
             self.pieces[captured_piece.color].add(captured_piece)
 
         # 3. 还原特殊效果
-        if move_type == "en_passant":
+        if move_type == MoveType.EN_PASSANT:
             self.grid[start_r][end_c] = captured_piece
-        elif move_type == "castling":
+        elif move_type == MoveType.CASTLING:
             is_kingside = (end_c > start_c)
             rook_start_c = self.cols - 1 if is_kingside else 0
             rook_end_c = end_c - 1 if is_kingside else end_c + 1
@@ -145,17 +150,10 @@ class Board:
         self.pieces[new_piece.color].add(new_piece)
         return new_piece
 
-    def is_in_check(self, color):
+    def is_in_check(self, color:Color):
         king_pos = self.king_pos[color]
         if not king_pos: return True # 不应该发生
-        return self.is_square_attacked(king_pos, color.opposite())
-
-    def is_square_attacked(self, pos, by_color):
-        """
-        检查位置 pos 是否受到 by_color 方的攻击
-        优化：使用 rules.py 中的反向搜索逻辑
-        """
-        return MoveRules.is_square_attacked(self, pos, by_color)
+        return MoveRules.is_square_attacked(self.grid, self.rows, self.cols, king_pos, color.opposite())
 
     def _legal_move_generator(self, color):
         """
@@ -164,7 +162,7 @@ class Board:
         """
         for piece in self.pieces[color]:
             start_pos = piece.position
-            pseudo_moves = piece.get_valid_moves(self)
+            pseudo_moves = piece.get_valid_moves(self.grid, self.rows, self.cols, self.last_move)
             
             for move in pseudo_moves:
                 orig_last_move = self.last_move

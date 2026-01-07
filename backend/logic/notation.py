@@ -1,5 +1,11 @@
 import re
 import json
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .board import Board
+
 from .constants import Color, PieceType
 from .piece import Pawn, Rook, Knight, Bishop, Queen, King
 
@@ -15,7 +21,7 @@ class NotationHandler:
         return (rows - int(alg[1]), ord(alg[0]) - ord('a'))
 
     @staticmethod
-    def parse_fen_to_board(board, fen):
+    def parse_fen_to_board(board:'Board', fen):
         """将 FEN 棋子部分加载到 Board 对象中"""
         parts = fen.split()
         if not parts: return

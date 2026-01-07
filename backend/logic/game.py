@@ -1,5 +1,4 @@
 import os
-import re
 import json
 from .board import Board
 from .constants import Color, PieceType
@@ -131,9 +130,6 @@ class Game:
             self.winner = None # 平局
             
         return True, "成功"
-
-    def get_pgn(self):
-        return NotationHandler.generate_pgn(self.move_history, self.winner, self.game_over)
 
     def get_state_dict(self):
         """

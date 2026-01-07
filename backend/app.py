@@ -51,7 +51,7 @@ def read_root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
 
 @app.post("/save/{room_id}")
-async def save_game(room_id: str, filename: str = None):
+async def save_game(room_id: str, filename: str = ""):
     if room_id not in games:
         return {"error": "Room not found"}
     
@@ -68,7 +68,7 @@ async def save_game(room_id: str, filename: str = None):
     with open(f"saved_games/{save_name}.json", "w", encoding="utf-8") as f:
         json.dump(state_dict, f, indent=2, ensure_ascii=False)
     
-    return {"message": f"游戏已成功保存为 {save_name}", "pgn": game.get_pgn()}
+    return {"message": f"游戏已成功保存为 {save_name}"}
 
 @app.get("/list_saved")
 def list_saved():

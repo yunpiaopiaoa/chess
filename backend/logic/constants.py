@@ -14,3 +14,9 @@ class PieceType(Enum):
     BISHOP = "B"
     QUEEN = "Q"
     KING = "K"
+
+class MoveType(Enum):
+    NORMAL = "normal"
+    EN_PASSANT = "en_passant"
+    CASTLING = "castling"
+    PROMOTION = "promotion"
