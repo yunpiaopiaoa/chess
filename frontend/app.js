@@ -195,9 +195,11 @@ function onSqClick(r, c) {
         const ms = pieceMovesCache[`${selected.r},${selected.c}`] || [];
         const moveObj = ms.find(m => m.end[0] === r && m.end[1] === c);
         
-        if (moveObj) {
-            // 执行移动逻辑... 
-            // 利用后端返回的 type 直接判断，不再手动检查坐标和棋子类型
+        // 获取选中的棋子对象
+        const selP = b[selected.r][selected.c];
+
+        if (moveObj && selP && selP.color === liveData.turn) {
+            // 只有是己方回合选中的己方棋子才执行移动逻辑
             if (moveObj.type === 'promotion') {
                 pMove = { start: [selected.r, selected.c], end: [r, c] };
                 document.getElementById('promotion-modal').style.display = 'flex';
@@ -207,7 +209,7 @@ function onSqClick(r, c) {
             selected = null;
         } else {
             // 重新选择其他棋子或取消选择
-            if (p && p.color === liveData.turn) {
+            if (p) {
                 selected = { r, c };
                 requestPieceMoves(r, c);
             } else {
@@ -215,8 +217,8 @@ function onSqClick(r, c) {
             }
         }
     } else {
-        // 第一次点击：如果是己方棋子，则选中并请求合法移动
-        if (p && p.color === liveData.turn) {
+        // 第一次点击：如果是棋子，则选中并请求其移动范围（无论颜色）
+        if (p) {
             selected = { r, c };
             requestPieceMoves(r, c);
         }

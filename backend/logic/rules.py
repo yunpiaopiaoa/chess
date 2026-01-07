@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Generator, Any
+from typing import TYPE_CHECKING, Generator
 from .constants import Color, PieceType, MoveType
 from .move import Move, CastlingMove, EnPassantMove, PromotionMove
 
@@ -81,7 +81,7 @@ class MoveRules:
         return MoveRules._get_moves_in_directions(grid, rows, cols, pos, color, MoveRules.KNIGHT_OFFSETS, limit=1)
 
     @staticmethod
-    def get_pawn_moves(grid: list[list[Piece | None]], rows: int, cols: int, last_move: Move | Any, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
+    def get_pawn_moves(grid: list[list[Piece | None]], rows: int, cols: int, last_move: Move | None, pos: tuple[int, int], color: Color) -> Generator[Move, None, None]:
         r, c = pos
         piece = grid[r][c]
         if not piece: return
@@ -114,11 +114,8 @@ class MoveRules:
                 else:
                     yield Move(pos, (tr, tc), piece, captured_piece=target)
             elif target is None and last_move:
-                # 适配新的 Move 对象或旧的元组
-                if isinstance(last_move, Move):
-                    l_start, l_end, l_piece = last_move.start, last_move.end, last_move.piece
-                else:
-                    l_start, l_end, l_piece = last_move
+                # 只有当上一步是对方兵跃进两格时，才能吃过路兵
+                l_start, l_end, l_piece = last_move.start, last_move.end, last_move.piece
                 
                 if l_piece and l_piece.type == PieceType.PAWN and l_piece.color != color:
                     if l_end == (r, c + dc) and abs(l_start[0] - l_end[0]) == 2:

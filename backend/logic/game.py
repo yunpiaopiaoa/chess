@@ -55,9 +55,17 @@ class Game:
                 self.make_move(start, target, promo)
 
     def get_piece_legal_moves(self, pos):
-        """延迟计算：仅在前端请求特定棋子时计算其合法移动"""
+        """延迟计算：仅在前端请求特定棋子时计算其合法移动。
+        不限制回合展示，允许查看对方棋子移动范围。
+        """
         if self.game_over: return []
-        return self.board.get_piece_legal_moves(pos, self.turn)
+        r, c = pos
+        piece = self.board.grid[r][c]
+        if not piece:
+            return []
+        
+        # 传入该棋子自身的颜色进行合法性判定
+        return self.board.get_piece_legal_moves(pos, piece.color)
 
     def make_move(self, start, end, promotion_choice=None):
         if self.game_over:

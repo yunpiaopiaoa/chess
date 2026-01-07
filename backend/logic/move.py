@@ -121,6 +121,8 @@ class PromotionMove(Move):
         self.old_type = piece.type
 
     def execute(self, board: Board):
+        #WARNING: 注意这里没有创建新棋子对象，而是直接修改原棋子的类型
+        #升变本身不需要修改board的pieces集合，因为piece对象没有变
         super().execute(board)
         # 原地升变：直接修改 piece 的属性
         if self.promotion_choice:

@@ -78,6 +78,7 @@ class NotationHandler:
         board.grid = [[None for _ in range(board.cols)] for _ in range(board.rows)]
         board.pieces = {Color.WHITE: set(), Color.BLACK: set()}
         board.king_pos = {Color.WHITE: None, Color.BLACK: None}
+        board.last_move = None
         
         rows_str = placement.split('/')
         
