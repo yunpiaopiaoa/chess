@@ -2,7 +2,7 @@ import os
 import json
 from .board import Board
 from .constants import Color, PieceType
-from .piece import Queen, Rook, Bishop, Knight
+from .piece import Piece, Queen, Rook, Bishop, Knight
 from .notation import NotationHandler
 
 class Game:
@@ -13,7 +13,6 @@ class Game:
         self.fen_history = []  # 延迟到加载后初始化
         self.game_over = False
         self.winner = None
-        self._cached_legal_moves = None # 缓存当前回合的合法移动
         
         # 加载默认配置或执行默认初始化
         self._load_settings()
@@ -46,7 +45,6 @@ class Game:
         self.fen_history = [NotationHandler.generate_board_fen(self.board, self.turn)]
         self.game_over = False
         self.winner = None
-        self._cached_legal_moves = None
 
     def load_pgn(self, content):
         """利用 NotationHandler 简化 PGN 加载逻辑"""
@@ -57,25 +55,22 @@ class Game:
             if start and target:
                 self.make_move(start, target, promo)
 
-    def get_legal_moves(self):
-        """缓存优化：避免在同一回合内重复计算昂贵的合法移动"""
-        if self._cached_legal_moves is None:
-            self._cached_legal_moves = self.board.get_legal_moves(self.turn)
-        return self._cached_legal_moves
+    def get_piece_legal_moves(self, pos):
+        """延迟计算：仅在前端请求特定棋子时计算其合法移动"""
+        if self.game_over: return []
+        return self.board.get_piece_legal_moves(pos, self.turn)
 
     def make_move(self, start, end, promotion_choice=None):
         if self.game_over:
             return False, "游戏已结束"
 
-        # 简单逻辑提前：基础校验，避免进入昂贵的合法移动计算
-        piece = self.board.grid[start[0]][start[1]]
-        if not piece or piece.color != self.turn:
-            return False, "不是当前棋手的棋子"
-
-        legal_moves = self.get_legal_moves()
-        if start not in legal_moves or end not in legal_moves[start]:
+        # 获取该位置棋子的合法移动（仅针对当前点击或尝试拖拽的棋子计算）
+        legal_moves = self.get_piece_legal_moves(start)
+        if not legal_moves or end not in legal_moves:
             return False, "非法移动"
 
+        piece: Piece = self.board.grid[start[0]][start[1]] # 既然通过了合法校验，piece 肯定存在
+        
         # 移动前的变量准备
         is_capture = self.board.grid[end[0]][end[1]] is not None or \
                      (piece.type == PieceType.PAWN and start[1] != end[1])
@@ -111,7 +106,6 @@ class Game:
 
         self.move_history.append(move_notation)
         self.turn = self.turn.opposite()
-        self._cached_legal_moves = None # 切换回合，清除缓存
         
         # 三次重复检测
         current_fen = NotationHandler.generate_board_fen(self.board, self.turn)
@@ -133,14 +127,12 @@ class Game:
 
     def get_state_dict(self):
         """
-        精简后的状态字典：仅包含当前必要状态。
-        彻底移除 board 字典和 pgn 字符串，所有棋盘显示由前端根据 fen_history 解析。
+        精简后的状态字典：移除了全量 legal_moves。
         """
         return {
             "turn": self.turn.value,
             "game_over": self.game_over,
             "winner": self.winner.value if self.winner else None,
-            "legal_moves": {f"{r},{c}": moves for (r, c), moves in self.get_legal_moves().items()},
             "history": self.move_history,
             "fen_history": self.fen_history
         }

@@ -113,7 +113,16 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            if message["type"] == "move":
+            if message["type"] == "get_moves":
+                pos = tuple(message["pos"])
+                moves = game.get_piece_legal_moves(pos)
+                await websocket.send_text(json.dumps({
+                    "type": "piece_moves",
+                    "pos": pos,
+                    "moves": moves
+                }))
+            
+            elif message["type"] == "move":
                 start = tuple(message["start"])
                 end = tuple(message["end"])
                 promo = message.get("promotion")

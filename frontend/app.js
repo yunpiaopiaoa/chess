@@ -30,6 +30,9 @@ function showView(view) {
     refreshUI();
 }
 
+let lastMove = null;
+let pieceMovesCache = {}; // 客户端缓存合法移动
+
 function connectWS() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/ws/${ROOM_ID}`);
@@ -39,12 +42,15 @@ function connectWS() {
         const msg = JSON.parse(e.data);
         if (msg.type === 'init' || msg.type === 'update') {
             liveData = msg.state;
+            pieceMovesCache = {}; // 棋局变化，清空本地缓存
             document.getElementById('room-id-label').innerText = ROOM_ID;
             
-            // Reset local view index if we receive an update and were at the end, 
-            // or if it was a forceful init (reset)
             if (msg.type === 'init') liveViewIdx = null;
-            
+            refreshUI();
+        } else if (msg.type === 'piece_moves') {
+            // 收到后端计算的特定棋子合法移动
+            const key = `${msg.pos[0]},${msg.pos[1]}`;
+            pieceMovesCache[key] = msg.moves;
             refreshUI();
         } else if (msg.type === 'error') showToast(msg.message, true);
     };
@@ -65,7 +71,7 @@ function refreshUI() {
         const targetFEN = isHistoryView ? liveData.fen_history[liveViewIdx] : liveData.fen_history[liveData.fen_history.length - 1];
         const b = parseFENToGrid(targetFEN);
         
-        renderBoard(lGrid, b, liveData.legal_moves, isHistoryView || liveData.game_over);
+        renderBoard(lGrid, b, isHistoryView || liveData.game_over);
         renderHistory(document.getElementById('live-history'), liveData, liveViewIdx, true);
         
         const statusEl = document.getElementById('live-status-label');
@@ -93,7 +99,7 @@ function refreshUI() {
                         ? archiveData.fen_history[archiveIdx] 
                         : archiveData.fen_history[archiveData.fen_history.length - 1];
         const b = parseFENToGrid(targetFEN);
-        renderBoard(aGrid, b, {}, true);
+        renderBoard(aGrid, b, true);
         renderHistory(document.getElementById('archive-history'), archiveData, archiveIdx, false);
         document.getElementById('archive-step-info').innerText = `步数: ${archiveIdx || 0} / ${archiveData.history.length}`;
     } else {
@@ -134,7 +140,7 @@ function parseFENToGrid(fen) {
     return grid;
 }
 
-function renderBoard(container, grid, legals, readOnly) {
+function renderBoard(container, grid, readOnly) {
     if (!container || !grid.length) return;
     container.innerHTML = '';
     const rows = grid.length;
@@ -159,7 +165,7 @@ function renderBoard(container, grid, legals, readOnly) {
 
             if (!readOnly && selected && selected.r === r && selected.c === c) sq.classList.add('selected');
             if (!readOnly && selected) {
-                const moves = legals[`${selected.r},${selected.c}`] || [];
+                const moves = pieceMovesCache[`${selected.r},${selected.c}`] || [];
                 if (moves.some(m => m[0] === r && m[1] === c)) sq.classList.add('highlight');
             }
 
@@ -180,14 +186,14 @@ function onSqClick(r, c) {
         return;
     }
 
-    // 从最新的 FEN 解析出当前棋盘状态
     const b = parseFENToGrid(liveData.fen_history[liveData.fen_history.length - 1]);
+    const p = b[r][c];
 
     if (selected) {
-        const ms = liveData.legal_moves[`${selected.r},${selected.c}`] || [];
+        // 检查是否点击了已经缓存的合法移动
+        const ms = pieceMovesCache[`${selected.r},${selected.c}`] || [];
         if (ms.some(m => m[0] === r && m[1] === c)) {
-            // 升变判断：如果是兵到达底线
-            const p = b[selected.r][selected.c];
+            // 执行移动逻辑...
             if (p && p.type === 'P' && (r === 0 || r === b.length - 1)) {
                 pMove = { start: [selected.r, selected.c], end: [r, c] };
                 document.getElementById('promotion-modal').style.display = 'flex';
@@ -196,14 +202,32 @@ function onSqClick(r, c) {
             }
             selected = null;
         } else {
-            const p = b[r][c];
-            selected = (p && p.color === liveData.turn) ? {r, c} : null;
+            // 重新选择其他棋子或取消选择
+            if (p && p.color === liveData.turn) {
+                selected = { r, c };
+                requestPieceMoves(r, c);
+            } else {
+                selected = null;
+            }
         }
     } else {
-        const p = b[r][c];
-        if (p && p.color === liveData.turn) selected = {r, c};
+        // 第一次点击：如果是己方棋子，则选中并请求合法移动
+        if (p && p.color === liveData.turn) {
+            selected = { r, c };
+            requestPieceMoves(r, c);
+        }
     }
     refreshUI();
+}
+
+/**
+ * 向后端请求特定位置棋子的合法移动
+ */
+function requestPieceMoves(r, c) {
+    const key = `${r},${c}`;
+    if (!pieceMovesCache[key]) {
+        ws.send(JSON.stringify({ type: 'get_moves', pos: [r, c] }));
+    }
 }
 
 function renderHistory(el, state, active, isLive) {

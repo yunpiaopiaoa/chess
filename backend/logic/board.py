@@ -158,21 +158,30 @@ class Board:
     def _legal_move_generator(self, color):
         """
         内部生成器：产生所有合法的移动 (start_pos, end_pos)。
-        封装了“模拟-检查-撤销”的通用逻辑。
         """
         for piece in self.pieces[color]:
-            start_pos = piece.position
-            pseudo_moves = piece.get_valid_moves(self.grid, self.rows, self.cols, self.last_move)
+            yield from ((piece.position, move) for move in self.get_piece_legal_moves(piece.position, color))
+
+    def get_piece_legal_moves(self, pos, color):
+        """新增：仅计算特定位置棋子的合法移动（延迟计算的关键）"""
+        r, c = pos
+        piece = self.grid[r][c]
+        if not piece or piece.color != color:
+            return []
+
+        legal_moves = []
+        start_pos = piece.position
+        # 注意：此处 piece.get_valid_moves 是生成器
+        for move in piece.get_valid_moves(self.grid, self.rows, self.cols, self.last_move):
+            orig_last_move = self.last_move
+            captured, m_type = self.move_piece(start_pos, move)
+            in_check = self.is_in_check(color)
+            self.undo_move(start_pos, move, captured, m_type)
+            self.last_move = orig_last_move
             
-            for move in pseudo_moves:
-                orig_last_move = self.last_move
-                captured, m_type = self.move_piece(start_pos, move)
-                in_check = self.is_in_check(color)
-                self.undo_move(start_pos, move, captured, m_type)
-                self.last_move = orig_last_move
-                
-                if not in_check:
-                    yield start_pos, move
+            if not in_check:
+                legal_moves.append(move)
+        return legal_moves
 
     def has_legal_moves(self, color):
         """判断是否存在至少一个合法移动（用于将死或僵局的快速判定）"""
