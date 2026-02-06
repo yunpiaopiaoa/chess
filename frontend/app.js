@@ -1,347 +1,192 @@
-const PIECES = {
-    'white': { 'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔' },
-    'black': { 'P': '♟', 'R': '♜', 'N': '♞', 'B': '♝', 'Q': '♛', 'K': '♚' }
+const ROOM_ID = new URLSearchParams(window.location.search).get('room') || 'default';
+let chessBoard, liveCtrl, archiveCtrl, currentView = 'home', promotionMove = null;
+
+const UI = {
+    text: (id, text) => { const el = document.getElementById(id); if (el) el.innerText = text; },
+    html: (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; },
+    color: (id, color) => { const el = document.getElementById(id); if (el) el.style.color = color; },
+    show: (id, show) => { const el = document.getElementById(id); if (el) el.style.display = show ? 'block' : 'none'; },
+    flex: (id, show) => { const el = document.getElementById(id); if (el) el.style.display = show ? 'flex' : 'none'; },
+    bg: (id, bg) => { const el = document.getElementById(id); if (el) el.style.background = bg; },
+    toast: (msg, err) => window.showToast(msg, err)
 };
 
-const ROOM_ID = new URLSearchParams(window.location.search).get('room') || 'default';
-let ws = null;
-let liveData = null;
-let liveViewIdx = null;
-let archiveData = null;
-let archiveIdx = null;
-let selected = null;
-let pMove = null;
-let currentView = 'home';
+function initApp() {
+    chessBoard = new ChessBoard('live-board');
+    liveCtrl = new LiveController(chessBoard, ROOM_ID);
+    archiveCtrl = new ArchiveController(new ChessBoard('archive-board'));
+    liveCtrl.promoter = (sr, sc, er, ec) => {
+        promotionMove = { start: [sr, sc], end: [er, ec] };
+        UI.flex('promotion-modal', true);
+    };
+    showView(new URLSearchParams(window.location.search).get('view') || 'home');
+}
 
-function showView(view) {
+function showView(view, force = false) {
+    if (!force && view !== 'live' && currentView === 'live' && liveCtrl.isOngoing() && !liveCtrl.canQuietlyExit()) {
+        UI.toast("对局进行中，请先使用退出按钮", true);
+        return;
+    }
     currentView = view;
     document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
     document.getElementById(`view-${view}`).classList.add('active');
-    
-    document.querySelectorAll('.nav-links button').forEach(b => b.classList.remove('active'));
-    const navBtn = document.getElementById(`btn-nav-${view}`);
-    if (navBtn) navBtn.classList.add('active');
 
-    if (view === 'live' && !ws) connectWS();
-    if (view === 'archive') loadArchiveList();
-    
-    // Reset view index when switching back to live
-    if (view === 'live') liveViewIdx = null;
-    refreshUI();
-}
-
-let lastMove = null;
-let pieceMovesCache = {}; // 客户端缓存合法移动
-
-function connectWS() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws/${ROOM_ID}`);
-    document.getElementById('live-status-label').innerText = "连接中...";
-    
-    ws.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'init' || msg.type === 'update') {
-            liveData = msg.state;
-            pieceMovesCache = {}; // 棋局变化，清空本地缓存
-            document.getElementById('room-id-label').innerText = ROOM_ID;
-            
-            if (msg.type === 'init') liveViewIdx = null;
-            refreshUI();
-        } else if (msg.type === 'piece_moves') {
-            // 收到后端计算的特定棋子合法移动
-            const key = `${msg.pos[0]},${msg.pos[1]}`;
-            pieceMovesCache[key] = msg.moves;
-            refreshUI();
-        } else if (msg.type === 'error') showToast(msg.message, true);
-    };
-    ws.onclose = () => { 
-        document.getElementById('live-status-label').innerText = "断开"; 
-        document.getElementById('live-status-label').style.color = "#e74c3c";
-        ws = null; 
-    };
-}
-
-function refreshUI() {
-    // Live View
-    if (liveData) {
-        const lGrid = document.getElementById('live-board');
-        const isHistoryView = liveViewIdx !== null && liveViewIdx < liveData.fen_history.length;
-        
-        // 核心彻底重构：完全通过 FEN 解析出当前棋盘
-        const targetFEN = isHistoryView ? liveData.fen_history[liveViewIdx] : liveData.fen_history[liveData.fen_history.length - 1];
-        const b = parseFENToGrid(targetFEN);
-        
-        renderBoard(lGrid, b, isHistoryView || liveData.game_over);
-        renderHistory(document.getElementById('live-history'), liveData, liveViewIdx, true);
-        
-        const statusEl = document.getElementById('live-status-label');
-        const msgEl = document.getElementById('live-msg');
-        const resetBtn = document.getElementById('btn-reset');
-        
-        if (liveData.game_over) {
-            statusEl.innerText = "对局结束";
-            statusEl.style.background = "#c0392b";
-            msgEl.innerHTML = `<b style="color:#e74c3c">游戏结束！${liveData.outcome || ''}</b>`;
-            resetBtn.style.display = 'block';
-        } else {
-            statusEl.innerText = "在线";
-            statusEl.style.background = "#1a252f";
-            msgEl.innerText = isHistoryView ? "正在查看历史棋着" : "";
-            resetBtn.style.display = 'none';
-        }
-        document.getElementById('live-turn-label').innerText = liveData.turn === 'white' ? '白方' : '黑方';
-    }
-
-    // Archive View
-    const aGrid = document.getElementById('archive-board');
-    if (archiveData) {
-        const targetFEN = (archiveIdx !== null && archiveIdx < archiveData.fen_history.length) 
-                        ? archiveData.fen_history[archiveIdx] 
-                        : archiveData.fen_history[archiveData.fen_history.length - 1];
-        const b = parseFENToGrid(targetFEN);
-        renderBoard(aGrid, b, true);
-        renderHistory(document.getElementById('archive-history'), archiveData, archiveIdx, false);
-        document.getElementById('archive-step-info').innerText = `步数: ${archiveIdx || 0} / ${archiveData.history.length}`;
-    } else {
-        if (aGrid) aGrid.innerHTML = '';
-    }
+    if (view === 'live') {
+        if (!liveCtrl.ws) liveCtrl.connect();
+        chessBoard.onSquareClick = (r, c) => liveCtrl.handleSquareClick(r, c);
+        liveCtrl.refreshUI();
+    } else if (view === 'archive') {
+        archiveCtrl.board.onSquareClick = (r, c) => archiveCtrl.handleSquareClick(r, c);
+        archiveCtrl.refreshUI();
+    } else if (view === 'home') loadDashboard();
 }
 
 /**
- * 动态 FEN 解析器：自动适配棋盘维度
+ * 加载仪表盘内容
  */
-function parseFENToGrid(fen) {
-    const placement = fen.split(' ')[0];
-    const rowsArr = placement.split('/');
-    const rowCount = rowsArr.length;
-    
-    // 计算列数 (从第一行推导)
-    let colCount = 0;
-    for (const char of rowsArr[0]) {
-        if (/\d/.test(char)) colCount += parseInt(char);
-        else colCount++;
+async function loadDashboard() {
+    const grid = document.getElementById('dashboard-grid');
+    if (!grid) return;
+    UI.html('dashboard-grid', '<div style="color:#7f8c8d; grid-column: 1/-1; text-align:center; padding: 40px;">正在加载存档棋谱...</div>');
+    try {
+        const r = await fetch('/list_saved');
+        const d = await r.json();
+        renderDashboard(d.games || []);
+    } catch (e) {
+        UI.html('dashboard-grid', '<div class="card-error">加载失败</div>');
     }
+}
 
-    const grid = Array(rowCount).fill(null).map(() => Array(colCount).fill(null));
+function renderDashboard(games) {
+    const grid = document.getElementById('dashboard-grid');
+    grid.innerHTML = `<div class="game-card new-game"><div class="card-preview"><div class="card-icon">+</div></div><div class="card-title">新对局</div></div>`;
     
-    rowsArr.forEach((rowStr, r) => {
-        let c = 0;
-        for (const char of rowStr) {
-            if (/\d/.test(char)) {
-                c += parseInt(char);
-            } else {
-                const color = char === char.toUpperCase() ? 'white' : 'black';
-                const type = char.toUpperCase();
-                grid[r][c] = { type, color };
-                c++;
-            }
+    grid.querySelector('.new-game .card-preview').onclick = async () => {
+        liveCtrl.resetState();
+        await fetch(`/reset/${ROOM_ID}`, { method: 'POST' });
+        showView('live');
+    };
+
+    games.forEach(id => {
+        const card = document.createElement('div');
+        card.className = 'game-card';
+        card.innerHTML = `<div class="card-actions"><button class="action-btn btn-delete">×</button></div>
+                        <div class="card-preview"><div class="card-icon">♟</div></div>
+                        <div class="card-title"><span>${id}</span></div>`;
+
+        card.querySelector('.btn-delete').onclick = async (e) => {
+            e.stopPropagation();
+            card.classList.add('removing');
+            await new Promise(r => setTimeout(r, 300));
+            const r = await fetch(`/delete_archive/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const d = await r.json();
+            if (d.error) { UI.toast(d.error, true); card.classList.remove('removing'); }
+            else { card.remove(); UI.toast("棋谱已删除"); }
+        };
+        card.querySelector('.card-preview').onclick = () => { showView('archive'); archiveCtrl.loadArchive(id); };
+        grid.appendChild(card);
+    });
+}
+
+// --- 暴露给 HTML 的桥接方法 ---
+
+window.quitGame = () => {
+    if (liveCtrl.isOngoing() && !liveCtrl.canQuietlyExit()) UI.flex('exit-modal', true);
+    else performExit(false);
+};
+
+window.handleExitChoice = (choice) => {
+    UI.show('exit-modal', false);
+    if (choice === 'save') performExit(true);
+    else if (choice === 'nosave') performExit(false);
+};
+
+async function performExit(shouldSave) {
+    if (shouldSave) {
+        await fetch(`/save/${ROOM_ID}?filename=${encodeURIComponent(window.getLocalTimestamp())}`, { method: 'POST' });
+        UI.toast("已自动保存并退出");
+    }
+    liveCtrl.resetState();
+    showView('home', true);
+}
+
+window.resetGame = async () => {
+    const doReset = async () => {
+        if (!liveCtrl.canQuietlyExit()) await fetch(`/save/${ROOM_ID}?filename=${encodeURIComponent(window.getLocalTimestamp())}`, { method: 'POST' });
+        await fetch(`/reset/${ROOM_ID}`, { method: 'POST' });
+        liveCtrl.resetState();
+    };
+    if (!liveCtrl.isOngoing() || liveCtrl.canQuietlyExit()) doReset();
+    else window.askConfirm("重新开始", "确定要放弃当前对局并重新开始吗？", doReset);
+};
+
+window.confirmPromo = (t) => {
+    liveCtrl.ws.send(JSON.stringify({ type: 'move', ...promotionMove, promotion: t }));
+    UI.show('promotion-modal', false);
+    promotionMove = null;
+};
+
+window.getLocalTimestamp = () => {
+    const n = new Date();
+    const f = (v) => String(v).padStart(2, '0');
+    return `${n.getFullYear()}-${f(n.getMonth()+1)}-${f(n.getDate())} ${f(n.getHours())}-${f(n.getMinutes())}-${f(n.getSeconds())}`;
+};
+
+let confirmCallback = null;
+window.askConfirm = (title, msg, onOk) => {
+    UI.text('confirm-title', title);
+    UI.text('confirm-msg', msg);
+    UI.flex('confirm-modal', true);
+    confirmCallback = onOk;
+};
+
+window.closeConfirm = (ok) => {
+    UI.show('confirm-modal', false);
+    if (ok && confirmCallback) confirmCallback();
+    confirmCallback = null;
+};
+
+window.showToast = (msg, err = false) => {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.innerText = msg;
+    el.className = 'toast' + (err ? ' error' : '');
+    UI.show('toast', true);
+    setTimeout(() => UI.show('toast', false), 2500);
+};
+
+window.renderHistory = (el, state, active, isLive) => {
+    if (!el || !state) return;
+    el.innerHTML = '';
+    state.history.forEach((h, i) => {
+        if (i % 2 === 0) {
+            const row = document.createElement('div'); row.className = 'history-row';
+            row.innerHTML = `<span class="move-num">${Math.floor(i/2)+1}.</span>`;
+            row.appendChild(createHSpan(state.history[i], i+1, active, state, isLive));
+            if (i+1 < state.history.length) row.appendChild(createHSpan(state.history[i+1], i+2, active, state, isLive));
+            el.appendChild(row);
         }
     });
-    return grid;
-}
-
-function renderBoard(container, grid, readOnly) {
-    if (!container || !grid.length) return;
-    container.innerHTML = '';
-    const rows = grid.length;
-    const cols = grid[0].length;
-
-    // 动态调整 CSS Grid 布局以适配不同维度的棋盘
-    container.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            const sq = document.createElement('div');
-            sq.className = `square ${(r + c) % 2 === 0 ? 'white' : 'black'}`;
-            
-            const p = grid[r][c];
-            if (p) {
-                const s = document.createElement('span');
-                s.className = `piece ${p.color}`;
-                s.innerText = PIECES[p.color][p.type];
-                sq.appendChild(s);
-            }
-
-            if (!readOnly && selected && selected.r === r && selected.c === c) sq.classList.add('selected');
-            if (!readOnly && selected) {
-                const moves = pieceMovesCache[`${selected.r},${selected.c}`] || [];
-                // 现在 moves 是对象列表 [{end: [r,c], type: '...'}]
-                if (moves.some(m => m.end[0] === r && m.end[1] === c)) sq.classList.add('highlight');
-            }
-
-            sq.onclick = () => { if (!readOnly) onSqClick(r, c); };
-            container.appendChild(sq);
-        }
-    }
-}
-
-function onSqClick(r, c) {
-    if (!liveData || liveData.game_over || liveViewIdx !== null) {
-        if (liveViewIdx !== null) {
-            if (confirm("回到即时对局？")) {
-                liveViewIdx = null;
-                refreshUI();
-            }
-        }
-        return;
-    }
-
-    const b = parseFENToGrid(liveData.fen_history[liveData.fen_history.length - 1]);
-    const p = b[r][c];
-
-    if (selected) {
-        // 检查是否点击了已经缓存的合法移动
-        const ms = pieceMovesCache[`${selected.r},${selected.c}`] || [];
-        const moveObj = ms.find(m => m.end[0] === r && m.end[1] === c);
-        
-        // 获取选中的棋子对象
-        const selP = b[selected.r][selected.c];
-
-        if (moveObj && selP && selP.color === liveData.turn) {
-            // 只有是己方回合选中的己方棋子才执行移动逻辑
-            if (moveObj.type === 'promotion') {
-                pMove = { start: [selected.r, selected.c], end: [r, c] };
-                document.getElementById('promotion-modal').style.display = 'flex';
-            } else {
-                ws.send(JSON.stringify({ type: 'move', start: [selected.r, selected.c], end: [r, c] }));
-            }
-            selected = null;
-        } else {
-            // 重新选择其他棋子或取消选择
-            if (p) {
-                selected = { r, c };
-                requestPieceMoves(r, c);
-            } else {
-                selected = null;
-            }
-        }
-    } else {
-        // 第一次点击：如果是棋子，则选中并请求其移动范围（无论颜色）
-        if (p) {
-            selected = { r, c };
-            requestPieceMoves(r, c);
-        }
-    }
-    refreshUI();
-}
-
-/**
- * 向后端请求特定位置棋子的合法移动
- */
-function requestPieceMoves(r, c) {
-    const key = `${r},${c}`;
-    if (!pieceMovesCache[key]) {
-        ws.send(JSON.stringify({ type: 'get_moves', pos: [r, c] }));
-    }
-}
-
-function renderHistory(el, state, active, isLive) {
-    if (!el) return;
-    el.innerHTML = '';
-    for (let i = 0; i < state.history.length; i += 2) {
-        const row = document.createElement('div'); row.className = 'history-row';
-        const n = document.createElement('span'); n.className = 'move-num'; n.innerText = `${Math.floor(i/2)+1}.`;
-        row.appendChild(n);
-        row.appendChild(createMoveSpan(state.history[i], i+1, active, state, isLive));
-        if (i+1 < state.history.length) row.appendChild(createMoveSpan(state.history[i+1], i+2, active, state, isLive));
-        el.appendChild(row);
-    }
     if (active === null) el.scrollTop = el.scrollHeight;
-}
+};
 
-function createMoveSpan(txt, step, active, state, isLive) {
+function createHSpan(txt, step, active, state, isLive) {
     const s = document.createElement('span');
     s.className = `move-val ${active === step ? 'active' : ''}`;
     s.innerText = txt;
     s.onclick = () => {
-        if (isLive) {
-            liveViewIdx = step;
-        } else {
-            archiveData = JSON.parse(JSON.stringify(state));
-            archiveIdx = step;
-        }
-        refreshUI();
+        const ctrl = isLive ? liveCtrl : archiveCtrl;
+        ctrl.viewIdx = (isLive && step === state.history.length) ? null : step;
+        ctrl.selected = null;
+        ctrl.pieceMovesCache = {};
+        ctrl.refreshUI();
     };
     return s;
 }
 
-function navLiveStep(d) {
-    if (!liveData) return;
-    if (liveViewIdx === null) liveViewIdx = liveData.history.length;
-    liveViewIdx = Math.max(0, Math.min(liveData.history.length, liveViewIdx + d));
-    if (liveViewIdx === liveData.history.length) liveViewIdx = null; // Back to real-time
-    refreshUI();
-}
-
-function navArchiveStep(d) {
-    if (!archiveData) return;
-    if (archiveIdx === null) archiveIdx = archiveData.history.length;
-    archiveIdx = Math.max(0, Math.min(archiveData.history.length, archiveIdx + d));
-    refreshUI();
-}
-
-async function saveCurrentGame() {
-    const defaultName = `game_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '_')}`;
-    const input = document.getElementById('save-filename-input');
-    input.value = defaultName;
-    document.getElementById('save-modal').style.display = 'flex';
-    input.focus();
-    input.select();
-}
-
-function closeSaveModal() {
-    document.getElementById('save-modal').style.display = 'none';
-}
-
-async function confirmSaveGame() {
-    const filename = document.getElementById('save-filename-input').value.trim();
-    if (!filename) return;
-
-    closeSaveModal();
-    const r = await fetch(`/save/${ROOM_ID}?filename=${encodeURIComponent(filename)}`, { method: 'POST' });
-    const d = await r.json(); 
-    if (d.error) showToast("保存失败: " + d.error, true);
-    else showToast(d.message);
-}
-
-function showToast(msg, isError = false) {
-    const el = document.getElementById('toast');
-    el.innerText = msg;
-    el.className = 'toast' + (isError ? ' error' : '');
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 2500);
-}
-
-async function resetGame() {
-    if (!confirm("确定要重新开始游戏吗？")) return;
-    const r = await fetch(`/reset/${ROOM_ID}`, { method: 'POST' });
-    const d = await r.json();
-    console.log(d.message);
-}
-
-async function loadArchiveList() {
-    const r = await fetch('/list_saved'); const d = await r.json();
-    const s = document.getElementById('archive-select');
-    if (!s) return;
-    s.innerHTML = '<option value="">-- 选择存档棋谱 --</option>';
-    d.games.forEach(g => s.innerHTML += `<option value="${g}">${g}</option>`);
-}
-
-async function loadSavedArchive() {
-    const id = document.getElementById('archive-select').value;
-    if (!id) return;
-    const r = await fetch(`/load/${id}`);
-    archiveData = await r.json(); archiveIdx = 0; refreshUI();
-}
-
-function confirmPromo(t) {
-    ws.send(JSON.stringify({ type: 'move', ...pMove, promotion: t }));
-    document.getElementById('promotion-modal').style.display = 'none';
-    pMove = null;
-}
-
-// Init view
-window.onload = () => {
-    showView(new URLSearchParams(window.location.search).get('view') || 'home');
-};
+window.navLiveStep = (d) => liveCtrl.navStep(d);
+window.navArchiveStep = (d) => archiveCtrl.navStep(d);
+window.undoMove = () => liveCtrl.undo();
+window.toggleFlip = () => { const c = currentView === 'live' ? liveCtrl : archiveCtrl; c.board.isFlipped = !c.board.isFlipped; c.refreshUI(); };
+window.showView = showView;
+window.onload = initApp;

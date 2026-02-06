@@ -77,6 +77,25 @@ def list_saved():
     files = [f.replace(".json", "") for f in os.listdir("saved_games") if f.endswith(".json")]
     return {"games": files}
 
+@app.delete("/delete_archive/{game_id}")
+def delete_archive(game_id: str):
+    path = f"saved_games/{game_id}.json"
+    if os.path.exists(path):
+        os.remove(path)
+        return {"message": "棋谱已删除"}
+    return {"error": "未找到棋谱"}, 404
+
+@app.post("/rename_archive")
+def rename_archive(old_name: str, new_name: str):
+    old_path = f"saved_games/{old_name}.json"
+    new_path = f"saved_games/{new_name}.json"
+    if not os.path.exists(old_path):
+        return {"error": "原棋谱不存在"}, 404
+    if os.path.exists(new_path):
+        return {"error": "目标文件名已存在"}, 400
+    os.rename(old_path, new_path)
+    return {"message": "更名成功"}
+
 @app.get("/load/{game_id}")
 def load_game(game_id: str):
     path = f"saved_games/{game_id}.json"
@@ -84,6 +103,15 @@ def load_game(game_id: str):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"error": "Not found"}
+
+@app.post("/analyze")
+async def analyze_position(data: dict):
+    # 使用 Game 提供的静态分析工具，避免初始化整个 Game 实例
+    moves = Game.get_moves_for_fen(data['fen'], tuple(data['pos']))
+    return {
+        "pos": data['pos'],
+        "moves": [{"end": m.end, "type": m.move_type.value} for m in moves]
+    }
 
 @app.post("/reset/{room_id}")
 async def reset_game(room_id: str):
@@ -141,6 +169,19 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                         "type": "update",
                         "state": game.get_state_dict(),
                         "last_move": {"start": start, "end": end}
+                    })
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": msg
+                    }))
+            
+            elif message["type"] == "undo":
+                success, msg = game.undo_move()
+                if success:
+                    await manager.broadcast(room_id, {
+                        "type": "update",
+                        "state": game.get_state_dict()
                     })
                 else:
                     await websocket.send_text(json.dumps({

@@ -31,6 +31,9 @@ class Move:
         self.is_checkmate = False
         self.san = ""
 
+    def __repr__(self):
+        return self.san if self.san else f"Move({self.start}->{self.end})"
+
     def execute(self, board: Board):
         sr, sc = self.start
         er, ec = self.end

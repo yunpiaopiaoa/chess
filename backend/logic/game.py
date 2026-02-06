@@ -1,17 +1,18 @@
 import os
 import json
+
+from backend.logic.move import Move
 from .board import Board
-from .constants import Color, MoveType
+from .constants import Color, MoveType, GameStatus
 from .notation import NotationHandler
 
 class Game:
     def __init__(self):
         self.board = Board()
         self.turn = Color.WHITE
-        self.move_history = []  # 记录 SAN 记谱
-        self.fen_history = []  # 延迟到加载后初始化
-        self.game_over = False
-        self.winner = None
+        self.history:list[Move] = []  # 存储 Move 对象序列，用于撤销 and SAN 显示
+        self.fen_history = []  # 缓存 FEN 历史，用于历史轨迹查看
+        self.status = GameStatus.ONGOING
         
         # 加载默认配置或执行默认初始化
         self._load_settings()
@@ -40,10 +41,9 @@ class Game:
         else:
             self.turn = Color.WHITE
             
-        self.move_history = []
+        self.history = []
         self.fen_history = [NotationHandler.generate_board_fen(self.board, self.turn)]
-        self.game_over = False
-        self.winner = None
+        self.status = GameStatus.ONGOING
 
     def load_pgn(self, content):
         """利用 NotationHandler 简化 PGN 加载逻辑"""
@@ -54,21 +54,34 @@ class Game:
             if start and target:
                 self.make_move(start, target, promo)
 
-    def get_piece_legal_moves(self, pos):
-        """延迟计算：仅在前端请求特定棋子时计算其合法移动。
-        不限制回合展示，允许查看对方棋子移动范围。
+    @staticmethod
+    def get_moves_for_fen(fen: str, pos: tuple[int, int]):
         """
-        if self.game_over: return []
+        静态工具方法：在任意 FEN 局面上计算特定位置的合法移动。
+        用于历史研究、复盘分析等无状态场景。
+        """
+        from .board import Board
+        temp_board = Board()
+        NotationHandler.parse_fen_to_board(temp_board, fen)
+        
         r, c = pos
-        piece = self.board.grid[r][c]
+        piece = temp_board.grid[r][c]
         if not piece:
             return []
         
         # 传入该棋子自身的颜色进行合法性判定
+        return temp_board.get_piece_legal_moves(pos, piece.color)
+
+    def get_piece_legal_moves(self, pos):
+        """当前对局中获取特定位置棋子的合法移动"""
+        r, c = pos
+        piece = self.board.grid[r][c]
+        if not piece:
+            return []
         return self.board.get_piece_legal_moves(pos, piece.color)
 
     def make_move(self, start, end, promotion_choice=None):
-        if self.game_over:
+        if self.status != GameStatus.ONGOING:
             return False, "游戏已结束"
 
         # 1. 验证合法性并获取完整的 Move 对象
@@ -91,26 +104,44 @@ class Game:
             move.is_check = True
             if self.board.is_checkmate(opponent_color):
                 move.is_checkmate = True
-                self.game_over = True
-                self.winner = self.turn
+                self.status = GameStatus.WHITE_WIN if self.turn == Color.WHITE else GameStatus.BLACK_WIN
         elif self.board.is_stalemate(opponent_color):
-            self.game_over = True
-            self.winner = None
+            self.status = GameStatus.DRAW
 
-        # 5. 生成记谱并记录历史
+        # 5. 生成记谱并记录历史对象
         move.san = NotationHandler.generate_san(self.board, move)
-        self.move_history.append(move.san)
+        self.history.append(move)
 
         # 6. 切换回合与历史记录
         self.turn = opponent_color
         current_fen = NotationHandler.generate_board_fen(self.board, self.turn)
         self.fen_history.append(current_fen)
         
-        if not self.game_over and self.fen_history.count(current_fen) >= 3:
-            self.game_over = True
-            self.winner = None
+        if self.status == GameStatus.ONGOING and self.fen_history.count(current_fen) >= 3:
+            self.status = GameStatus.DRAW
             
         return True, "成功"
+
+    def undo_move(self):
+        """撤销最后一步"""
+        if not self.history:
+            return False, "没有可撤销的移动"
+        
+        # 1. 弹出最后的移动对象
+        last_move = self.history.pop()
+        
+        # 2. 调用命令对象的 undo
+        last_move.undo(self.board)
+        
+        # 3. 同步其他状态
+        self.fen_history.pop()
+        self.turn = self.turn.opposite()
+        self.status = GameStatus.ONGOING
+        
+        # 4. 恢复 board.last_move 为上一个移动（如果存在）
+        self.board.last_move = self.history[-1] if self.history else None
+        
+        return True, "撤销成功"
 
     def get_state_dict(self):
         """
@@ -118,8 +149,7 @@ class Game:
         """
         return {
             "turn": self.turn.value,
-            "game_over": self.game_over,
-            "winner": self.winner.value if self.winner else None,
-            "history": self.move_history,
+            "status": self.status.value,
+            "history": [m.san for m in self.history],
             "fen_history": self.fen_history
         }

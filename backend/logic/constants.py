@@ -20,3 +20,9 @@ class MoveType(Enum):
     EN_PASSANT = "en_passant"
     CASTLING = "castling"
     PROMOTION = "promotion"
+
+class GameStatus(Enum):
+    ONGOING = "ongoing"
+    DRAW = "draw"
+    WHITE_WIN = "white_win"
+    BLACK_WIN = "black_win"
