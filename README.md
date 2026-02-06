@@ -83,11 +83,11 @@ python run_server.py
 
 ### 1. 接口分配原则
 - **HTTP (RESTful)**：处理**持久化、静态数据和无状态分析**。
-  - `GET /list_saved`: 拉取存档列表。
-  - `GET /load/{id}`: 读取特定历史棋谱。
-  - `POST /save/{id}`: 持久化存储当前对局及生成的截图（由于数据体积大，HTTP POST 承载更稳定）。
-  - `DELETE /delete_archive/{id}`: 清理磁盘存档。
-  - `POST /analyze`: 无状态的静态位置分析。
+  - `GET /archives`: 拉取存档列表。
+  - `GET /archives/{id}`: 读取特定历史棋谱数据。
+  - `POST /archives/save/{id}`: 持久化存储当前对局及生成的截图。
+  - `DELETE /archives/{id}`: 清理磁盘上的存档目录。
+  - `POST /analyze`: 无状态的静态位置走法分析。
 - **WebSocket (Real-time)**：处理**对局实时交互与状态同步**。
   - `move`, `undo`, `reset`, `get_moves`: 所有的游戏交互指令均通过 WS 发送，确保在单一消息流中按顺序执行。
 
