@@ -1,16 +1,29 @@
-class ArchiveController {
-    constructor(board) {
-        this.board = board;
-        this.data = null;
-        this.viewIdx = 0;
-        this.selected = null;
-        this.pieceMovesCache = {};
+class ArchiveController extends BaseChessController {
+    constructor(board, uiMap) {
+        super(board, uiMap);
+        this.cache = new Map(); // 内存缓存：存储已加载过的棋谱 JSON 数据
+        this.bindEvents();
+    }
+
+    bindEvents() {
+        super.bindEvents();
+        // 存档研究特有的监听已移至 app.js bindGlobalEvents 统一管理
     }
 
     async loadArchive(id) {
         if (!id) return;
-        const r = await fetch(`/archives/${id}`);
-        this.data = await r.json();
+        
+        let gameData;
+        if (this.cache.has(id)) {
+            // 如果缓存中有，直接使用，不再发起网络请求
+            gameData = this.cache.get(id);
+        } else {
+            const r = await fetch(`/archives/${encodeURIComponent(id)}`);
+            gameData = await r.json();
+            this.cache.set(id, gameData); // 存入缓存
+        }
+
+        this.data = gameData;
         this.data.id = id;
         this.viewIdx = 0;
         this.selected = null;
@@ -19,15 +32,16 @@ class ArchiveController {
     }
 
     handleSquareClick(r, c) {
-        if (!this.data) return;
-        const fen = (this.viewIdx !== null && this.viewIdx < this.data.fen_history.length) 
-                  ? this.data.fen_history[this.viewIdx] 
-                  : this.data.fen_history[this.data.fen_history.length - 1];
-        const grid = ChessBoard.parseFEN(fen);
+        const base = this.getBaseClickGrid();
+        if (!base) return;
+        const { grid, fen } = base;
 
         if (grid[r][c]) {
             if (this.selected && this.selected.r === r && this.selected.c === c) this.selected = null;
-            else { this.selected = { r, c }; this.fetchAnalysis(fen, r, c); }
+            else { 
+                this.selected = { r, c }; 
+                this.fetchAnalysis(fen, r, c); 
+            }
         } else this.selected = null;
         this.refreshUI();
     }
@@ -39,31 +53,20 @@ class ArchiveController {
             body: JSON.stringify({ fen, pos: [r, c] })
         })
         .then(res => res.json())
-        .then(data => { this.pieceMovesCache[`${r},${c}`] = data.moves; this.refreshUI(); });
-    }
-
-    navStep(d) {
-        if (!this.data) return;
-        this.viewIdx = Math.max(0, Math.min(this.data.history.length, (this.viewIdx || 0) + d));
-        this.selected = null;
-        this.pieceMovesCache = {};
-        this.refreshUI();
+        .then(data => { 
+            this.pieceMovesCache[`${r},${c}`] = data.moves; 
+            this.refreshUI(); 
+        });
     }
 
     refreshUI() {
         if (!this.data) return;
-        const fen = (this.viewIdx !== null && this.viewIdx < this.data.fen_history.length) 
-                  ? this.data.fen_history[this.viewIdx] 
-                  : this.data.fen_history[this.data.fen_history.length - 1];
         
-        this.board.render(ChessBoard.parseFEN(fen), {
-            selected: this.selected,
-            pieceMovesCache: this.pieceMovesCache,
-            turnColor: null
-        });
+        // 1. 调用基类渲染
+        this.renderBoard(false, null);
 
-        window.renderHistory(document.getElementById('archive-history'), this.data, this.viewIdx, false);
-        UI.text('archive-name-label', this.data.id || "历史存档");
-        UI.text('archive-step-info', `步数: ${this.viewIdx || 0} / ${this.data.history.length}`);
+        // 2. 处理存档研究特有的 UI
+        UI.text(this.uiMap.nameLabel, this.data.id || "历史存档");
+        UI.text(this.uiMap.stepLabel, `步数: ${this.viewIdx || 0} / ${this.data.history.length}`);
     }
 }

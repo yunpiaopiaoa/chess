@@ -6,6 +6,7 @@
     <title>Chess System</title>
     <link rel="stylesheet" href="/static/style.css?v=3.1">
     <script src="/static/ChessBoard.js?v=3.1" defer></script>
+    <script src="/static/BaseController.js?v=3.1" defer></script>
     <script src="/static/app.js?v=3.1" defer></script>
     <script src="/static/LiveController.js?v=3.1" defer></script>
     <script src="/static/ArchiveController.js?v=3.1" defer></script>
@@ -43,13 +44,13 @@
             <div class="history-box" id="live-history"></div>
             <div class="footer-tools">
                 <div class="btn-group">
-                    <button class="btn-sm btn-nav" onclick="navLiveStep(-1)">向前</button>
-                    <button class="btn-sm btn-nav" onclick="navLiveStep(1)">向后</button>
-                    <button class="btn-sm btn-nav" style="background: #9b59b6;" onclick="toggleFlip()">🔄 翻转</button>
-                    <button class="btn-sm btn-action" style="background: #f39c12;" onclick="undoMove()">↩ 撤销</button>
-                    <button id="btn-quit-game" class="btn-sm btn-action" style="background: #e74c3c;" onclick="quitGame()">🚪 退出对局</button>
+                    <button class="btn-sm btn-nav" data-action="nav-back">向前</button>
+                    <button class="btn-sm btn-nav" data-action="nav-forward">向后</button>
+                    <button class="btn-sm btn-nav" style="background: #9b59b6;" id="btn-toggle-flip">🔄 翻转</button>
+                    <button class="btn-sm btn-nav" style="background: #f39c12;" id="btn-undo-move">↩ 撤销</button>
+                    <button id="btn-quit-game" class="btn-sm btn-action" style="background: #e74c3c;">🚪 退出对局</button>
                 </div>
-                <button class="btn-sm" id="btn-reset" style="width:100%; background:#27ae60; margin-top:10px; display:none;" onclick="resetGame()">🔄 重新开始新对局</button>
+                <button class="btn-sm" id="btn-reset-game" style="width:100%; background:#27ae60; margin-top:10px; display:none;">🔄 重新开始新对局</button>
             </div>
         </div>
     </div>
@@ -65,11 +66,12 @@
             <div class="history-box" id="archive-history"></div>
             <div class="footer-tools">
                 <div class="btn-group">
-                    <button class="btn-sm btn-nav" onclick="navArchiveStep(-100)">|&lt;</button>
-                    <button class="btn-sm btn-nav" onclick="navArchiveStep(-1)">&lt;</button>
-                    <button class="btn-sm btn-nav" onclick="navArchiveStep(1)">&gt;</button>
-                    <button class="btn-sm btn-nav" onclick="navArchiveStep(100)">&gt;|</button>
-                    <button class="btn-sm btn-action" style="background:#7f8c8d;" onclick="showView('home')">🏠 返回首页</button>
+                    <button class="btn-sm btn-nav" data-action="nav-first">|&lt;</button>
+                    <button class="btn-sm btn-nav" data-action="nav-back">&lt;</button>
+                    <button class="btn-sm btn-nav" data-action="nav-forward">&gt;</button>
+                    <button class="btn-sm btn-nav" data-action="nav-last">&gt;|</button>
+                    <button class="btn-sm btn-nav" style="background: #9b59b6;" id="btn-toggle-flip-archive">🔄 翻转</button>
+                    <button class="btn-sm btn-action" style="background:#7f8c8d;" id="btn-back-home">🏠 返回首页</button>
                 </div>
             </div>
         </div>
@@ -81,9 +83,9 @@
             <h3 style="margin-top:0; color:#f1c40f;">退出确认</h3>
             <p style="color:#bdc3c7; font-size:14px;">对局正在进行中，请选择退出方式：</p>
             <div style="display:flex; flex-direction:column; gap:10px; margin-top:20px;">
-                <button class="btn-sm" style="background:#2ecc71;" onclick="handleExitChoice('save')">💾 保存并退出</button>
-                <button class="btn-sm" style="background:#e74c3c;" onclick="handleExitChoice('nosave')">🚪 不保存直接退出</button>
-                <button class="btn-sm" style="background:#7f8c8d;" onclick="handleExitChoice('cancel')">取消</button>
+                <button class="btn-sm btn-exit-choice" data-choice="save" style="background:#2ecc71;">💾 保存并退出</button>
+                <button class="btn-sm btn-exit-choice" data-choice="nosave" style="background:#e74c3c;">🚪 不保存直接退出</button>
+                <button class="btn-sm btn-exit-choice" data-choice="cancel" style="background:#7f8c8d;">取消</button>
             </div>
         </div>
     </div>
@@ -94,8 +96,8 @@
             <h3 id="confirm-title" style="margin-top:0; color:#f1c40f;">确认</h3>
             <p id="confirm-msg" style="color:#bdc3c7; font-size:14px;"></p>
             <div style="display:flex; gap:10px; margin-top:20px;">
-                <button class="btn-sm" style="flex:1; background:#7f8c8d;" onclick="closeConfirm(false)">取消</button>
-                <button class="btn-sm" style="flex:1; background:#e74c3c;" onclick="closeConfirm(true)">确认</button>
+                <button class="btn-sm btn-confirm" data-ok="false" style="flex:1; background:#7f8c8d;">取消</button>
+                <button class="btn-sm btn-confirm" data-ok="true" style="flex:1; background:#e74c3c;">确认</button>
             </div>
         </div>
     </div>
@@ -103,10 +105,10 @@
     <!-- Promotion Modal -->
     <div id="promotion-modal" class="modal-overlay">
         <div class="modal-box promo-box">
-            <div class="promo-item" onclick="confirmPromo('Q')">♕</div>
-            <div class="promo-item" onclick="confirmPromo('R')">♖</div>
-            <div class="promo-item" onclick="confirmPromo('B')">♗</div>
-            <div class="promo-item" onclick="confirmPromo('N')">♘</div>
+            <div class="promo-item" data-piece="Q">♕</div>
+            <div class="promo-item" data-piece="R">♖</div>
+            <div class="promo-item" data-piece="B">♗</div>
+            <div class="promo-item" data-piece="N">♘</div>
         </div>
     </div>
 
