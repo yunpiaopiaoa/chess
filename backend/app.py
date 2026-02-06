@@ -2,9 +2,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from typing import List, Dict
+from pydantic import BaseModel
+from typing import Dict, Optional
 import json
 import os
+import base64
+import shutil
 from .logic.game import Game
 
 app = FastAPI()
@@ -22,8 +25,16 @@ app.add_middleware(
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
+# 挂载存档目录以提供图片预览
+os.makedirs("saved_games", exist_ok=True)
+app.mount("/thumbnails", StaticFiles(directory="saved_games"), name="thumbnails")
+
 # 简单的房间管理：key 为房间 ID, value 为游戏实例
 games: Dict[str, Game] = {}
+
+class SaveGameRequest(BaseModel):
+    filename: Optional[str] = ""
+    screenshot: Optional[str] = ""  # Base64 字符串
 
 class ConnectionManager:
     def __init__(self):
@@ -50,59 +61,62 @@ manager = ConnectionManager()
 def read_root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
 
-@app.post("/save/{room_id}")
-async def save_game(room_id: str, filename: str = ""):
+@app.post("/archives/save/{room_id}")
+async def save_game(room_id: str, request: SaveGameRequest):
     if room_id not in games:
         return {"error": "Room not found"}
     
     game = games[room_id]
-    save_name = filename if filename else room_id
+    save_name = request.filename if request.filename else room_id
     
-    # 确保保存目录存在
-    os.makedirs("saved_games", exist_ok=True)
+    # 创建对局专属目录
+    game_dir = os.path.join("saved_games", save_name)
+    os.makedirs(game_dir, exist_ok=True)
     
     # 获取完整状态进行保存
     state_dict = game.get_state_dict()
     
-    # 统一保存为 JSON，作为持久化的唯一来源
-    with open(f"saved_games/{save_name}.json", "w", encoding="utf-8") as f:
+    # 保存 JSON
+    json_path = os.path.join(game_dir, "game_data.json")
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(state_dict, f, indent=2, ensure_ascii=False)
-    
-    return {"message": f"游戏已成功保存为 {save_name}"}
 
-@app.get("/list_saved")
+    # 处理并保存截图
+    if request.screenshot:
+        try:
+            header, encoded = request.screenshot.split(",", 1)
+            img_data = base64.b64decode(encoded)
+            img_path = os.path.join(game_dir, "preview.png")
+            with open(img_path, "wb") as f:
+                f.write(img_data)
+        except Exception as e:
+            print(f"保存截图失败: {e}")
+    
+    return {"message": f"游戏已成功保存至目录 {save_name}"}
+
+@app.get("/archives")
 def list_saved():
     if not os.path.exists("saved_games"):
         return {"games": []}
-    files = [f.replace(".json", "") for f in os.listdir("saved_games") if f.endswith(".json")]
-    return {"games": files}
+    # 返回目录列表
+    dirs = [d for d in os.listdir("saved_games") if os.path.isdir(os.path.join("saved_games", d))]
+    return {"games": dirs}
 
-@app.delete("/delete_archive/{game_id}")
-def delete_archive(game_id: str):
-    path = f"saved_games/{game_id}.json"
-    if os.path.exists(path):
-        os.remove(path)
-        return {"message": "棋谱已删除"}
-    return {"error": "未找到棋谱"}, 404
-
-@app.post("/rename_archive")
-def rename_archive(old_name: str, new_name: str):
-    old_path = f"saved_games/{old_name}.json"
-    new_path = f"saved_games/{new_name}.json"
-    if not os.path.exists(old_path):
-        return {"error": "原棋谱不存在"}, 404
-    if os.path.exists(new_path):
-        return {"error": "目标文件名已存在"}, 400
-    os.rename(old_path, new_path)
-    return {"message": "更名成功"}
-
-@app.get("/load/{game_id}")
+@app.get("/archives/{game_id}")
 def load_game(game_id: str):
-    path = f"saved_games/{game_id}.json"
+    path = os.path.join("saved_games", game_id, "game_data.json")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"error": "Not found"}
+    return {"error": "未找到存档"}, 404
+
+@app.delete("/archives/{game_id}")
+def delete_archive(game_id: str):
+    game_dir = os.path.join("saved_games", game_id)
+    if os.path.exists(game_dir):
+        shutil.rmtree(game_dir)
+        return {"message": "对局存档及预览图已完整删除"}
+    return {"error": "未找到对局存档"}, 404
 
 @app.post("/analyze")
 async def analyze_position(data: dict):
@@ -113,13 +127,6 @@ async def analyze_position(data: dict):
         "moves": [{"end": m.end, "type": m.move_type.value} for m in moves]
     }
 
-@app.post("/reset/{room_id}")
-async def reset_game(room_id: str):
-    games[room_id] = Game()
-    initial_state = games[room_id].get_state_dict()
-    await manager.broadcast(room_id, {"type": "init", "state": initial_state})
-    return {"message": "游戏已重置"}
-
 @app.websocket("/ws/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str):
     await manager.connect(room_id, websocket)
@@ -128,12 +135,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     if room_id not in games:
         games[room_id] = Game()
     
-    game = games[room_id]
-    
     # 发送当前状态
     await websocket.send_text(json.dumps({
         "type": "init",
-        "state": game.get_state_dict()
+        "state": games[room_id].get_state_dict()
     }))
 
     try:
@@ -141,22 +146,30 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             data = await websocket.receive_text()
             message = json.loads(data)
             
+            # 核心修复：每次操作都从全局 games 字典中动态获取实例。
+            # 否则当 reset 请求替换了字典里的对象时，此处闭包引用的仍是旧对象。
+            game = games.get(room_id)
+            if not game:
+                continue
+
             if message["type"] == "get_moves":
                 pos = tuple(message["pos"])
-                # 返回包含移动类型的信息，方便前端判断是否为升变控制弹窗
                 legal_moves = game.get_piece_legal_moves(pos)
-                moves_data = [
-                    {
-                        "end": m.end, 
-                        "type": m.move_type.value
-                    } for m in legal_moves
-                ]
+                moves_data = [{"end": m.end, "type": m.move_type.value} for m in legal_moves]
                 await websocket.send_text(json.dumps({
                     "type": "piece_moves",
                     "pos": pos,
                     "moves": moves_data
                 }))
             
+            elif message["type"] == "reset":
+                # 核心改进：通过 WebSocket 直接触发重置，确保指令序列同步
+                games[room_id] = Game()
+                await manager.broadcast(room_id, {
+                    "type": "init",
+                    "state": games[room_id].get_state_dict()
+                })
+
             elif message["type"] == "move":
                 start = tuple(message["start"])
                 end = tuple(message["end"])

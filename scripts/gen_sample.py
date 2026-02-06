@@ -28,16 +28,17 @@ def create_scholar_mate():
     # 4. Qxf7#
     game.make_move((3, 7), (1, 5))
     
-    # 确保目录存在
-    save_dir = "saved_games"
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    # 确保目录结构符合新版规范
+    game_id = "scholar_mate_sample"
+    game_dir = os.path.join("saved_games", game_id)
+    if not os.path.exists(game_dir):
+        os.makedirs(game_dir)
         
-    filename = os.path.join(save_dir, "scholar_mate_sample.json")
+    filename = os.path.join(game_dir, "game_data.json")
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(game.get_state_dict(), f, indent=2, ensure_ascii=False)
         
-    print(f"测试棋谱已创建: {filename}")
+    print(f"测试棋谱已按照新版结构创建: {filename}")
 
 if __name__ == "__main__":
     create_scholar_mate()

@@ -9,7 +9,7 @@ class ArchiveController {
 
     async loadArchive(id) {
         if (!id) return;
-        const r = await fetch(`/load/${id}`);
+        const r = await fetch(`/archives/${id}`);
         this.data = await r.json();
         this.data.id = id;
         this.viewIdx = 0;
